@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=10.0, user-scalable=yes">
+    <title>花滑——5刚体连杆动力学系统</title>
+    <style>
+        :root { --primary: #3498db; --bg: #f8f9fa; --text: #2c3e50; --skater: #ecf0f1; --limb: #e74c3c; }
+        * { box-sizing: border-box; }
+        html { touch-action: pan-x pan-y pinch-zoom; }
+        body { font-family: -apple-system, "Noto Sans SC", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 20px; max-width: 1100px; margin: 0 auto; overflow-x: hidden; touch-action: pan-x pan-y pinch-zoom; }
+        .card { background: white; border-radius: 12px; padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 20px; width: 100%; }
+        h1 { text-align: center; color: #2980b9; margin-bottom: 30px; }
+        h3 { border-left: 4px solid var(--primary); padding-left: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px;}
+
+        /* 双屏可视化区域 */
+        .top-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, 1fr); gap: 14px; margin-top: 15px; align-items: start; }
+        .left-panel { display: grid; gap: 10px; min-width: 0; }
+        .comparison-container { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 0; }
+        @media (max-width: 768px) { .comparison-container { grid-template-columns: 1fr; } }
+        .skater-box { flex: 1; background: #2c3e50; border-radius: 8px; position: relative; height: 300px; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 0; }
+        .box-title { color: white; z-index: 20; font-weight: bold; background: rgba(0,0,0,0.4); padding: 5px 15px; border-radius: 20px; position: absolute; top: 12px; left: 50%; transform: translateX(-50%); white-space: nowrap;}
+        .live-data-card { margin-bottom: 0; min-width: 0; padding: 16px; }
+        .live-data-card h3 { margin-top: 0; margin-bottom: 10px; font-size: 1rem; }
+        .live-data-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+        .live-data-item { background: #f4f9ff; border: 1px solid #d9e8f7; border-radius: 9px; padding: 9px 10px; min-width: 0; }
+        .live-data-label { display: block; color: #6f7f90; font-size: 0.76em; margin-bottom: 4px; }
+        .live-data-value { display: block; color: #1c5fa6; font-size: 1.02em; font-weight: 700; line-height: 1.1; }
+        .live-data-unit { display: block; color: #7f8c9a; font-size: 0.7em; margin-top: 2px; }
+        .calc-steps { display: grid; gap: 6px; margin-top: 10px; }
+        .calc-step { background: #fff8f8; border: 1px solid #fadbd8; border-radius: 8px; padding: 7px 8px; font-size: 0.78em; line-height: 1.45; }
+        .formula-title { display: block; color: #8a4f45; font-size: 0.74em; font-weight: 700; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.02em; }
+        .formula-body { display: block; color: #34495e; }
+        
+        /* 3D 旋转动画视口 */
+        .viewport { perspective: 1000px; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; position: absolute; inset: 0; padding-top: 24px;}
+        .skater { position: relative; width: 40px; height: 200px; transform-style: preserve-3d; }
+        
+        /* 身体连杆组件 */
+        .torso { position: absolute; width: 40px; height: 90px; background: var(--skater); top: 40px; border-radius: 10px; }
+        .head { position: absolute; width: 32px; height: 32px; background: var(--skater); top: 0px; left: 4px; border-radius: 50%; }
+        .limb { position: absolute; background: var(--limb); border-radius: 8px; transform-style: preserve-3d; }
+        
+        /* CSS 长度映射: 0.6m -> 60px, 0.8m -> 80px */
+        .arm { width: 12px; height: 60px; top: 45px; }
+        .leg { width: 16px; height: 80px; top: 120px; }
+        .arm-l { left: -6px; transform-origin: top center; }
+        .arm-r { right: -6px; transform-origin: top center; }
+        .leg-l { left: 0px; transform-origin: top center; }
+        .leg-r { right: 0px; transform-origin: top center; }
+
+        /* 控制区域 */
+        .controls-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 0; }
+        .control-group { background: #fdfdfd; padding: 15px; border: 1px solid #eee; border-radius: 8px; }
+        .slider-row { display: flex; align-items: center; margin-bottom: 8px; font-size: 0.9em; }
+        .slider-row label { width: 130px; }
+        input[type="range"] { flex-grow: 1; margin: 0 10px; }
+        .val-display { min-width: 55px; font-weight: bold; color: var(--primary); text-align: right; }
+        .mobile-scale-card { display: none; }
+        .mobile-action-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 0; }
+        .mobile-button { border: none; border-radius: 999px; padding: 10px 14px; font-size: 0.92em; font-weight: 600; cursor: pointer; }
+        .mobile-button.secondary { background: #dcecff; color: #215aab; }
+
+        .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+        @media (max-width: 768px) {
+            body { padding: clamp(8px, 3vw, 14px); font-size: clamp(13px, 3.8vw, 16px); }
+            h1 { font-size: clamp(1.2rem, 5vw, 1.6rem); margin-bottom: 18px; }
+            .card { padding: clamp(12px, 4vw, 18px); border-radius: 10px; }
+            .top-layout { grid-template-columns: 1fr; gap: 12px; }
+            .left-panel { gap: 12px; }
+            .comparison-container { gap: clamp(10px, 4vw, 18px); }
+            .skater-box { height: clamp(210px, 60vw, 320px); }
+            .controls-grid { grid-template-columns: 1fr; gap: clamp(12px, 4vw, 18px); }
+            .slider-row { gap: 8px; }
+            .slider-row label { width: clamp(92px, 28vw, 126px); font-size: 0.86em; }
+            input[type="range"] { margin: 0; min-width: 0; }
+            .val-display { min-width: 48px; font-size: 0.86em; }
+            .mobile-scale-card { display: block; }
+            .live-data-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .live-data-card { padding: 14px; }
+        }
+
+        @media (max-width: 768px) and (orientation: portrait) {
+            .comparison-container { grid-template-columns: 1fr; }
+            .controls-grid { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 900px) and (orientation: landscape) {
+            body { padding: clamp(6px, 2vw, 10px); }
+            h1 { font-size: clamp(1.05rem, 2.8vw, 1.25rem); margin-bottom: 10px; }
+            .top-layout { grid-template-columns: minmax(0, 1.15fr) minmax(190px, 0.9fr); gap: 8px; }
+            .left-panel { gap: 8px; }
+            .comparison-container { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+            .skater-box { height: clamp(160px, 31vw, 210px); }
+            .controls-grid { grid-template-columns: 1fr; gap: 8px; }
+            .control-group { padding: 12px; }
+            .formula-section { font-size: 0.95em; }
+            .live-data-card { padding: 12px; }
+            .live-data-card h3 { margin-bottom: 8px; font-size: 0.94rem; }
+            .live-data-grid { gap: 8px; }
+            .live-data-item { padding: 8px; }
+            .live-data-value { font-size: 0.96em; }
+            .calc-step { padding: 6px 7px; font-size: 0.74em; }
+        }
+
+        @media (max-width: 900px) and (orientation: landscape) {
+            html.compact-landscape body { padding: 4px; font-size: 11px; }
+            html.compact-landscape h1 { font-size: 0.96rem; margin: 0 0 6px; }
+            html.compact-landscape .card { padding: 8px; border-radius: 8px; margin-bottom: 8px; }
+            html.compact-landscape .top-layout { grid-template-columns: minmax(0, 1.08fr) minmax(156px, 0.92fr); gap: 6px; margin-top: 8px; }
+            html.compact-landscape .left-panel { gap: 6px; }
+            html.compact-landscape .comparison-container { gap: 6px; }
+            html.compact-landscape .skater-box { height: 122px; border-radius: 6px; }
+            html.compact-landscape .box-title { top: 6px; font-size: 0.72em; padding: 3px 8px; }
+            html.compact-landscape .viewport { padding-top: 10px; transform: scale(0.72); transform-origin: center center; }
+            html.compact-landscape .controls-grid { gap: 6px; margin-top: 0; }
+            html.compact-landscape .control-group { padding: 8px; }
+            html.compact-landscape .control-group h4 { margin-bottom: 6px; font-size: 0.9em; }
+            html.compact-landscape .slider-row { margin-bottom: 4px; font-size: 0.78em; }
+            html.compact-landscape .slider-row label { width: 72px; font-size: 0.82em; }
+            html.compact-landscape input[type="range"] { margin: 0 4px; }
+            html.compact-landscape .val-display { min-width: 38px; font-size: 0.8em; }
+            html.compact-landscape .mobile-action-row { gap: 6px; margin-top: 0; }
+            html.compact-landscape .mobile-button { padding: 7px 10px; font-size: 0.78em; }
+            html.compact-landscape .formula-section { font-size: 0.82em; padding: 8px; }
+            html.compact-landscape .table-wrap table { font-size: 0.8em; min-width: 640px; }
+            html.compact-landscape .live-data-card { padding: 6px; }
+            html.compact-landscape .live-data-card h3 { margin-bottom: 6px; font-size: 0.84em; }
+            html.compact-landscape .live-data-grid { gap: 5px; }
+            html.compact-landscape .live-data-item { padding: 5px; border-radius: 7px; }
+            html.compact-landscape .live-data-label { font-size: 0.68em; margin-bottom: 2px; }
+            html.compact-landscape .live-data-value { font-size: 0.82em; }
+            html.compact-landscape .live-data-unit { font-size: 0.64em; margin-top: 1px; }
+            html.compact-landscape .calc-steps { gap: 5px; margin-top: 8px; }
+            html.compact-landscape .calc-step { padding: 5px; font-size: 0.66em; }
+            html.compact-landscape .formula-title { font-size: 0.64em; margin-bottom: 2px; }
+        }
+
+        @media (max-width: 430px) {
+            .skater-box { height: clamp(190px, 64vw, 290px); }
+            .box-title { font-size: 0.86em; padding: 4px 10px; }
+            .slider-row label { width: clamp(82px, 30vw, 108px); }
+        }
+        
+        /* 公式区域 */
+        .formula-section { background: #fff; padding: 15px; overflow-x: auto; font-family: "Cambria Math", serif; font-size: 1.1em;}
+        .highlight { color: #e74c3c; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h1>⛸️ 花滑——5刚体连杆动力学系统</h1>
+
+    <div class="card" style="background: #e8f4f8;">
+        <div class="slider-row" style="font-size: 1.1em; max-width: 500px; margin: 0 auto;">
+            <label><b>初始角速度 ω₁：</b></label>
+            <input type="range" id="w1" min="1" max="20" step="0.5" value="6.0">
+            <span class="val-display" id="w1-v">6.0 rad/s</span>
+        </div>
+    </div>
+
+    <div class="card mobile-scale-card" style="background: #f4fbff; padding: 10px 12px;">
+        <div class="mobile-action-row" style="margin-top: 0; justify-content: center;">
+            <button type="button" class="mobile-button secondary" id="mobile-compact-mode">超紧凑横屏</button>
+        </div>
+    </div>
+
+    <div class="top-layout">
+        <div class="left-panel">
+            <div class="comparison-container">
+                <div class="skater-box">
+                    <div class="box-title">初态 (状态 1)</div>
+                    <div class="viewport">
+                        <div class="skater" id="skater1">
+                            <div class="head"></div><div class="torso"></div>
+                            <div class="limb arm arm-l" id="s1-armL" style="background: #3498db;"></div>
+                            <div class="limb arm arm-r" id="s1-armR" style="background: #3498db;"></div>
+                            <div class="limb leg leg-l" id="s1-legL" style="background: #3498db;"></div>
+                            <div class="limb leg leg-r" id="s1-legR" style="background: #3498db;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="skater-box" style="background: #1a252f;">
+                    <div class="box-title">末态 (状态 2)</div>
+                    <div class="viewport">
+                        <div class="skater" id="skater2">
+                            <div class="head"></div><div class="torso"></div>
+                            <div class="limb arm arm-l" id="s2-armL"></div>
+                            <div class="limb arm arm-r" id="s2-armR"></div>
+                            <div class="limb leg leg-l" id="s2-legL"></div>
+                            <div class="limb leg leg-r" id="s2-legR"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls-grid">
+                <div class="control-group">
+                    <h4 style="margin-top:0">初态关节开合角 (0°~90°)</h4>
+                    <div class="slider-row"><label>左臂角度 θ</label><input type="range" id="la1" min="0" max="90" value="80"><span class="val-display" id="v-la1">80°</span></div>
+                    <div class="slider-row"><label>右臂角度 θ</label><input type="range" id="ra1" min="0" max="90" value="80"><span class="val-display" id="v-ra1">80°</span></div>
+                    <div class="slider-row"><label>支撑腿角度 θ</label><input type="range" id="ll1" min="0" max="90" value="0"><span class="val-display" id="v-ll1">0°</span></div>
+                    <div class="slider-row"><label>浮动腿角度 θ</label><input type="range" id="rl1" min="0" max="90" value="85"><span class="val-display" id="v-rl1">85°</span></div>
+                </div>
+                <div class="control-group">
+                    <h4 style="margin-top:0">末态关节开合角 (0°~90°)</h4>
+                    <div class="slider-row"><label>左臂角度 θ</label><input type="range" id="la2" min="0" max="90" value="5"><span class="val-display" id="v-la2">5°</span></div>
+                    <div class="slider-row"><label>右臂角度 θ</label><input type="range" id="ra2" min="0" max="90" value="5"><span class="val-display" id="v-ra2">5°</span></div>
+                    <div class="slider-row"><label>支撑腿角度 θ</label><input type="range" id="ll2" min="0" max="90" value="0"><span class="val-display" id="v-ll2">0°</span></div>
+                    <div class="slider-row"><label>浮动腿角度 θ</label><input type="range" id="rl2" min="0" max="90" value="15"><span class="val-display" id="v-rl2">15°</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card live-data-card">
+            <h3>实时数据</h3>
+            <div class="live-data-grid">
+                <div class="live-data-item"><span class="live-data-label">初始角速度</span><span class="live-data-value" id="stat-w1">6.0</span><span class="live-data-unit">rad/s</span></div>
+                <div class="live-data-item"><span class="live-data-label">末态角速度</span><span class="live-data-value" id="stat-w2">0.00</span><span class="live-data-unit">rad/s</span></div>
+                <div class="live-data-item"><span class="live-data-label">初态转动惯量 I₁</span><span class="live-data-value" id="stat-i1">0.000</span><span class="live-data-unit">kg·m²</span></div>
+                <div class="live-data-item"><span class="live-data-label">末态转动惯量 I₂</span><span class="live-data-value" id="stat-i2">0.000</span><span class="live-data-unit">kg·m²</span></div>
+                <div class="live-data-item"><span class="live-data-label">角动量 L</span><span class="live-data-value" id="stat-l">0.000</span><span class="live-data-unit">kg·m²/s</span></div>
+                <div class="live-data-item"><span class="live-data-label">提速倍率</span><span class="live-data-value" id="stat-ratio">0.00x</span><span class="live-data-unit">ω₂ / ω₁</span></div>
+            </div>
+            <div id="calc-steps" class="calc-steps"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>📊 物理参数设定与核心推导公式</h3>
+        <p style="color: #7f8c8d; font-size: 0.95em; margin-top: -5px;">基于 5 刚体连杆力学模型（设定运动员总体重 50kg，身高约 1.6m）</p>
+        
+        <div class="table-wrap">
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 0.95em; text-align: center; min-width: 720px;">
+            <thead>
+                <tr style="background-color: #f8f9fa; border-bottom: 2px solid #bdc3c7; color: #2c3e50;">
+                    <th style="padding: 10px; text-align: left;">身体部位 (刚体)</th>
+                    <th style="padding: 10px;">质量 (m)</th>
+                    <th style="padding: 10px;">特征长度 (L)</th>
+                    <th style="padding: 10px; text-align: left;">转动参数与说明</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-bottom: 1px solid #ecf0f1;">
+                    <td style="padding: 10px; text-align: left;">躯干与头部 (核心轴心)</td>
+                    <td style="padding: 10px;">25.0 kg</td>
+                    <td style="padding: 10px;"> r = 0.2 m </td>
+                    <td style="padding: 10px; text-align: left;">提供基础转动惯量 <b>I₀ = 0.5mr² = 0.5 kg·m²（近似）</b></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ecf0f1;">
+                    <td style="padding: 10px; text-align: left;">左臂 / 右臂</td>
+                    <td style="padding: 10px;">各 2.5 kg</td>
+                    <td style="padding: 10px;">L = 0.6 m</td>
+                    <td style="padding: 10px; text-align: left;">肩关节距中心旋转轴 <b>d = 0.2 m</b></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #ecf0f1;">
+                    <td style="padding: 10px; text-align: left;">左腿 / 右腿 (浮动腿)</td>
+                    <td style="padding: 10px;">各 10.0 kg</td>
+                    <td style="padding: 10px;">L = 0.8 m</td>
+                    <td style="padding: 10px; text-align: left;">髋关节距中心旋转轴 <b>d = 0.2 m</b></td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
+
+        <div style="background: #eef7ff; padding: 18px; border-radius: 8px; border-left: 4px solid #3498db; font-family: 'Cambria Math', 'Times New Roman', serif; font-size: 1.05em; color: #2c3e50;">
+            <div style="margin-bottom: 10px;"><b>1. 肢体质心半径推导 (三角函数转换)：</b></div>
+            <div style="margin-bottom: 15px; padding-left: 15px;">假设肢体质量均匀分布，其质心位于连杆中点 (L/2)。当肢体张开角度为 θ 时，该肢体质心到人体中心旋转轴的垂直距离 r 为：<br>
+            <span style="color: #e74c3c; font-weight: bold; background: white; padding: 2px 5px; border-radius: 3px;">r = d + (L / 2) · sin(θ)</span></div>
+
+            <div style="margin-bottom: 10px;"><b>2. 系统总转动惯量 (I) 的叠加原理：</b></div>
+            <div style="margin-bottom: 15px; padding-left: 15px;">
+            <span style="color: #e74c3c; font-weight: bold; background: white; padding: 2px 5px; border-radius: 3px;">I_总 = I₀ + m_臂(r_左臂² + r_右臂²) + m_腿(r_左腿² + r_右腿²)</span></div>
+
+            <div style="margin-bottom: 10px;"><b>3. 角动量守恒定律 (L)：</b></div>
+            <div style="margin-bottom: 15px; padding-left: 15px;">系统在冰面旋转过渡阶段不受外力矩作用，其初始状态(1)与收缩末态(2)的总角动量保持不变：<br>
+            <span style="color: #e74c3c; font-weight: bold; background: white; padding: 2px 5px; border-radius: 3px;">L = I₁ · ω₁ = I₂ · ω₂</span></div>
+
+            <div style="margin-bottom: 5px;"><b>4. 末态爆发角速度求解 (ω₂)：</b></div>
+            <div style="padding-left: 15px;">
+            <span style="color: #e74c3c; font-weight: bold; font-size: 1.2em; background: white; padding: 2px 5px; border-radius: 3px;">ω₂ = (I₁ · ω₁) / I₂</span></div>
+        </div>
+    </div>
+    <script>
+        const M_ARM = 2.5, M_LEG = 10, I_TORSO = 0.3;
+        const L_ARM = 0.6, L_LEG = 0.8, D_PIVOT = 0.2;
+        let w2_current = 0, w1_current = 0;
+
+        const rootElement = document.documentElement;
+        const inputs = document.querySelectorAll('input[type="range"]');
+        const mobileCompactModeButton = document.getElementById('mobile-compact-mode');
+
+        function setCompactLandscape(enabled) {
+            rootElement.classList.toggle('compact-landscape', enabled);
+
+            if (mobileCompactModeButton) {
+                mobileCompactModeButton.innerText = enabled ? '关闭超紧凑' : '超紧凑横屏';
+            }
+
+            try {
+                localStorage.setItem('skating-compact-landscape', enabled ? '1' : '0');
+            } catch (error) {
+            }
+        }
+
+        function initMobileAssist() {
+            let compactLandscapeEnabled = false;
+
+            try {
+                compactLandscapeEnabled = localStorage.getItem('skating-compact-landscape') === '1';
+            } catch (error) {
+            }
+
+            setCompactLandscape(compactLandscapeEnabled);
+
+            if (mobileCompactModeButton) {
+                mobileCompactModeButton.addEventListener('click', () => {
+                    const nextState = !rootElement.classList.contains('compact-landscape');
+                    setCompactLandscape(nextState);
+                });
+            }
+        }
+        
+        // 三角函数转换：将角度(度)转为对应的质心半径 r (米)
+        function getRadius(length, angleDeg) {
+            const angleRad = angleDeg * Math.PI / 180;
+            return D_PIVOT + (length / 2) * Math.sin(angleRad);
+        }
+
+        function update() {
+            const w1 = parseFloat(document.getElementById('w1').value);
+            w1_current = w1;
+
+            const deg = {
+                la1: parseFloat(document.getElementById('la1').value), ra1: parseFloat(document.getElementById('ra1').value),
+                ll1: parseFloat(document.getElementById('ll1').value), rl1: parseFloat(document.getElementById('rl1').value),
+                la2: parseFloat(document.getElementById('la2').value), ra2: parseFloat(document.getElementById('ra2').value),
+                ll2: parseFloat(document.getElementById('ll2').value), rl2: parseFloat(document.getElementById('rl2').value)
+            };
+
+            // 更新角度显示
+            document.getElementById('w1-v').innerText = w1.toFixed(1) + " rad/s";
+            for (let key in deg) { document.getElementById('v-' + key).innerText = deg[key] + "°"; }
+
+            // 转换真实物理半径
+            const r = {
+                la1: getRadius(L_ARM, deg.la1), ra1: getRadius(L_ARM, deg.ra1),
+                ll1: getRadius(L_LEG, deg.ll1), rl1: getRadius(L_LEG, deg.rl1),
+                la2: getRadius(L_ARM, deg.la2), ra2: getRadius(L_ARM, deg.ra2),
+                ll2: getRadius(L_LEG, deg.ll2), rl2: getRadius(L_LEG, deg.rl2)
+            };
+
+            // 物理学计算
+            const I1 = I_TORSO + M_ARM * (r.la1**2 + r.ra1**2) + M_LEG * (r.ll1**2 + r.rl1**2);
+            const L = I1 * w1;
+            const I2 = I_TORSO + M_ARM * (r.la2**2 + r.ra2**2) + M_LEG * (r.ll2**2 + r.rl2**2);
+            w2_current = L / I2;
+            const speedRatio = w2_current / w1;
+            const armRadiusStart = (r.la1 + r.ra1) / 2;
+            const armRadiusEnd = (r.la2 + r.ra2) / 2;
+            const legRadiusStart = (r.ll1 + r.rl1) / 2;
+            const legRadiusEnd = (r.ll2 + r.rl2) / 2;
+            const angularMomentumProduct = I1 * w1;
+
+            // 视觉姿态渲染 (Z轴旋转呈现抬腿/抬臂)
+            document.getElementById('s1-armL').style.transform = `rotateZ(${deg.la1}deg)`;
+            document.getElementById('s1-armR').style.transform = `rotateZ(${-deg.ra1}deg)`;
+            document.getElementById('s1-legL').style.transform = `rotateZ(${deg.ll1}deg)`;
+            document.getElementById('s1-legR').style.transform = `rotateZ(${-deg.rl1}deg)`;
+
+            document.getElementById('s2-armL').style.transform = `rotateZ(${deg.la2}deg)`;
+            document.getElementById('s2-armR').style.transform = `rotateZ(${-deg.ra2}deg)`;
+            document.getElementById('s2-legL').style.transform = `rotateZ(${deg.ll2}deg)`;
+            document.getElementById('s2-legR').style.transform = `rotateZ(${-deg.rl2}deg)`;
+
+            document.getElementById('stat-w1').innerText = w1.toFixed(1);
+            document.getElementById('stat-w2').innerText = w2_current.toFixed(2);
+            document.getElementById('stat-i1').innerText = I1.toFixed(3);
+            document.getElementById('stat-i2').innerText = I2.toFixed(3);
+            document.getElementById('stat-l').innerText = L.toFixed(3);
+            document.getElementById('stat-ratio').innerText = speedRatio.toFixed(2) + 'x';
+
+            document.getElementById('calc-steps').innerHTML = `
+                <div class="calc-step"><span class="formula-title">臂部半径代入</span><span class="formula-body">r左臂,1 = 0.2 + 0.3 × sin(${deg.la1.toFixed(0)}°) = ${r.la1.toFixed(3)} m，r右臂,1 = 0.2 + 0.3 × sin(${deg.ra1.toFixed(0)}°) = <b>${r.ra1.toFixed(3)} m</b></span></div>
+                <div class="calc-step"><span class="formula-title">腿部半径代入</span><span class="formula-body">r支撑腿,2 = 0.2 + 0.4 × sin(${deg.ll2.toFixed(0)}°) = ${r.ll2.toFixed(3)} m，r浮动腿,2 = 0.2 + 0.4 × sin(${deg.rl2.toFixed(0)}°) = <b>${r.rl2.toFixed(3)} m</b></span></div>
+                <div class="calc-step"><span class="formula-title">初态惯量</span><span class="formula-body">I₁ = 0.3 + 2.5 × (${r.la1.toFixed(3)}² + ${r.ra1.toFixed(3)}²) + 10 × (${r.ll1.toFixed(3)}² + ${r.rl1.toFixed(3)}²) = <b>${I1.toFixed(3)} kg·m²</b></span></div>
+                <div class="calc-step"><span class="formula-title">末态角速度</span><span class="formula-body">ω₂ = (I₁ × ω₁) / I₂ = (${I1.toFixed(3)} × ${w1.toFixed(1)}) / ${I2.toFixed(3)} = <b>${w2_current.toFixed(2)} rad/s</b></span></div>
+                <div class="calc-step"><span class="formula-title">角动量守恒</span><span class="formula-body">L = I₁ω₁ = ${I1.toFixed(3)} × ${w1.toFixed(1)} = <b>${angularMomentumProduct.toFixed(3)} kg·m²/s</b>，提速 <span class="highlight">${speedRatio.toFixed(2)} 倍</span></span></div>
+            `;
+        }
+
+        // 动画引擎：基于计算出的角速度执行 3D Y轴旋转
+        let angle1 = 0;
+        let angle2 = 0;
+        let lastTime = performance.now();
+
+        function animate(time) {
+            const dt = time - lastTime;
+            lastTime = time;
+            // 弧度/秒 转为 度/秒 
+            angle1 += (w1_current * 180 / Math.PI) * (dt / 1000);
+            angle2 += (w2_current * 180 / Math.PI) * (dt / 1000);
+            
+            document.getElementById('skater1').style.transform = `rotateY(${angle1}deg)`;
+            document.getElementById('skater2').style.transform = `rotateY(${angle2}deg)`;
+            requestAnimationFrame(animate);
+        }
+
+        initMobileAssist();
+        inputs.forEach(input => input.addEventListener('input', update));
+        update(); 
+        requestAnimationFrame(animate); // 启动自转引擎
+    </script>
+</body>
+</html>
